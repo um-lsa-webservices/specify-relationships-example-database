@@ -1,0 +1,106 @@
+version: '3.7'
+services:
+
+  mariadb:
+    restart: unless-stopped
+    image: mariadb:${DB_MARIADB_VERSION:-10.11}
+    command: --max_allowed_packet=1073741824
+    volumes:
+      - "database:/var/lib/mysql"
+      - "./seed-database:/docker-entrypoint-initdb.d"
+    ports:
+      - "${DB_EXTERNAL_PORT:-3606}:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=${DB_ROOT_PASSWORD:-root}
+      - MYSQL_DATABASE=${DB_NAME:-specify}
+      - MYSQL_USER=${DB_USER:-master}
+      - MYSQL_PASSWORD=${DB_PASSWORD:-master}
+
+  specify7:
+    restart: unless-stopped
+    image: specifyconsortium/specify7-service:${S7_VERSION:-v7}
+    init: true
+    volumes:
+      - "specify6:/opt/Specify:ro"
+      - "static-files:/volumes/static-files"
+    environment:
+      - DATABASE_HOST=mariadb
+      - DATABASE_PORT=3306
+      - DATABASE_NAME=${DB_NAME:-specify}
+      - MASTER_NAME=${DB_USER:-master}
+      - MASTER_PASSWORD=${DB_PASSWORD:-master}
+      - SECRET_KEY=${S7_SECRET_KEY:-S7_SECRET_KEY_STRING}
+      - ASSET_SERVER_URL=http://${ASSET_SERVER_HOSTNAME:-host.docker.internal}/web_asset_store.xml
+      - ASSET_SERVER_KEY=${ASSET_SERVER_KEY:-ASSET_SERVER_KEY_STRING}
+      - REPORT_RUNNER_HOST=report-runner
+      - REPORT_RUNNER_PORT=8080
+      - CELERY_BROKER_URL=redis://redis/0
+      - CELERY_RESULT_BACKEND=redis://redis/1
+      - LOG_LEVEL=${S7_LOG_LEVEL:-WARNING}
+      - SP7_DEBUG=${S7_DEBUG:-false}
+
+  specify7-worker:
+    restart: unless-stopped
+    image: specifyconsortium/specify7-service:${S7_VERSION:-v7}
+    command: ve/bin/celery -A specifyweb worker -l INFO --concurrency=1
+    init: true
+    volumes:
+      - "specify6:/opt/Specify:ro"
+      - "static-files:/volumes/static-files"
+    environment:
+      - DATABASE_HOST=mariadb
+      - DATABASE_PORT=3306
+      - DATABASE_NAME=${DB_NAME:-specify}
+      - MASTER_NAME=${DB_USER:-master}
+      - MASTER_PASSWORD=${DB_PASSWORD:-master}
+      - SECRET_KEY=${S7_SECRET_KEY:-S7_SECRET_KEY_STRING}
+      - ASSET_SERVER_URL=http://${ASSET_SERVER_HOSTNAME:-host.docker.internal}/web_asset_store.xml
+      - ASSET_SERVER_KEY=${ASSET_SERVER_KEY:-ASSET_SERVER_KEY_STRING}
+      - REPORT_RUNNER_HOST=report-runner
+      - REPORT_RUNNER_PORT=8080
+      - CELERY_BROKER_URL=redis://redis/0
+      - CELERY_RESULT_BACKEND=redis://redis/1
+      - LOG_LEVEL=${S7_LOG_LEVEL:-WARNING}
+      - SP7_DEBUG=${S7_DEBUG:-false}
+
+  asset-server:
+    restart: unless-stopped
+    image: specifyconsortium/specify-asset-service
+    init: true
+    volumes:
+      - "attachments:/home/specify/attachments"
+    environment:
+      - SERVER_NAME=${ASSET_SERVER_HOSTNAME:-host.docker.internal}
+      - SERVER_PORT=80
+      - ATTACHMENT_KEY=${ASSET_SERVER_KEY:-ASSET_SERVER_KEY_STRING}
+      - DEBUG_MODE=${ASSET_SERVER_DEBUG_MODE:-false}
+
+  specify6:
+    image: specifyconsortium/specify6-service:${S6_VERSION:-6.8.03}
+    volumes:
+      - "specify6:/volumes/Specify"
+
+  nginx:
+    restart: unless-stopped
+    image: nginx
+    ports:
+      - "${NGINX_EXTERNAL_PORT:-80}:80"
+    volumes:
+      - "static-files:/volumes/static-files:ro"
+      - "specify6:/volumes/specify6:ro"
+
+      - "./nginx/specify.conf:/etc/nginx/conf.d/default.conf:ro"
+
+  report-runner:
+    restart: unless-stopped
+    image: specifyconsortium/report-runner
+
+  redis:
+    restart: unless-stopped
+    image: redis:6.0
+
+volumes:
+  attachments: # the asset-servers attachment files
+  database: # the data directory for mariadb
+  specify6: # provides Specify 6 files to Specify 7 and the web server
+  static-files: # provides Specify 7 static files to the web server
